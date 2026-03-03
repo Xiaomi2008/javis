@@ -1,0 +1,36 @@
+# Large media files
+*.mp4
+*.mp3
+*.webm
+*.mov
+*.avi
+*.mkv
+
+# Downloads
+/downloads/
+
+# Secrets
+/secrets/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build artifacts
+build/
+dist/
+*.egg

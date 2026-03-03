@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "javis"
+version = "0.1.0"
+description = "An AI Assistant Library with Meta-Cognition and ReAct Pattern"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Javis", email = "javis@example.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+    "pyyaml>=6.0",
+    "python-dateutil>=2.8.0",
+]
+
+[project.optional-dependencies]
+web = ["beautifulsoup4>=4.12.0"]
+browser = ["playwright>=1.30.0"]
+vision = ["openai>=1.0.0"]
+tts = ["pyttsx3>=2.90"]
+dev = ["pytest>=7.4.0", "black>=23.0", "mypy>=1.5.0", "pytest-cov>=4.1.0"]
+
+[project.urls]
+Homepage = "https://github.com/Xiaomi2008/javis"
+Repository = "https://github.com/Xiaomi2008/javis"
+Issues = "https://github.com/Xiaomi2008/javis/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py310']
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --cov=javis --cov-report=term-missing"
