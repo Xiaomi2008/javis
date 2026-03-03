@@ -11,6 +11,7 @@ import json
 from core import Javis
 from planner import SimplePlanner, StepPlanner, Plan, Task, TaskStatus
 from memory import MemoryEntry
+from metacognition import MetacognitiveMonitor, ExecutionState
 
 
 @dataclass
@@ -70,6 +71,9 @@ class JavisAgent:
         self.planner = planner or SimplePlanner()
         self.step_planner = StepPlanner()
         
+        # Metacognitive monitor for intelligent replanning (LLM-powered)
+        self.metacognitive_monitor: Optional[MetacognitiveMonitor] = None
+        
         # Active sessions
         self._sessions: Dict[str, AgentSession] = {}
         
@@ -86,6 +90,14 @@ class JavisAgent:
             "think": self._tool_think,
             "done": self._tool_done,
         }
+        
+        # Initialize metacognitive monitor with LLM capability
+        try:
+            from metacognition import MetacognitiveMonitor, ExecutionState
+            self.metacognitive_monitor = MetacognitiveMonitor(agent_session=self)
+            print("✅ Metacognitive monitor initialized (LLM-powered)")
+        except Exception as e:
+            print(f"⚠️ Could not initialize LLM metacognition: {e}")
         
         # Remember agent initialization
         self.javis.remember("Agent initialized", category="system")
@@ -196,6 +208,26 @@ class JavisAgent:
             # Update task
             task.status = TaskStatus.COMPLETED if observation else TaskStatus.FAILED
             task.result = observation
+            
+            # Metacognitive replanning check (LLM-powered)
+            if self.metacognitive_monitor and not session.auto_approve:
+                state = ExecutionState(
+                    step_count=session.current_iteration,
+                    successful_steps=sum(1 for t in session.thoughts if "completed" in str(t.action).lower()),
+                    failed_steps=sum(1 for t in session.thoughts if "failed" in str(t.action).lower() or not t.observation),
+                )
+                
+                replan_reason = self.metacognitive_monitor.should_replan(
+                    state=state,
+                    plan=session.plan,
+                    last_action=action,
+                    last_result=observation,
+                )
+                
+                if replan_reason:
+                    print(f"\n🧠 Metacognitive decision: Replan needed ({replan_reason.value})")
+                    # Would trigger replanning logic here
+                    # For now, just log it
             
             # Store intermediate results
             if observation:

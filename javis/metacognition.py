@@ -1,4 +1,4 @@
-"""Meta-cognition for autonomous replanning - Cursor-style interleaving."""
+"""Meta-cognition for autonomous replanning - LLM-powered intelligent planning."""
 
 import re
 from typing import List, Dict, Optional, Any, Callable
@@ -22,9 +22,10 @@ class MetaThought:
     """A meta-level thought about planning/reasoning."""
     timestamp: datetime = field(default_factory=datetime.now)
     observation: str = ""  # What I observed
-    reflection: str = ""   # My analysis
+    reflection: str = ""   # My analysis (LLM-generated reasoning)
     decision: str = ""       # What I decided
     confidence: float = 0.0  # How confident I am (0-1)
+    llm_analysis: Optional[str] = None  # Raw LLM output for transparency
 
 
 @dataclass
@@ -61,16 +62,176 @@ class ExecutionState:
         )
 
 
+class LLMMetacognitiveAnalyzer:
+    """
+    LLM-powered metacognitive analyzer for intelligent replanning decisions.
+    
+    Instead of hardcoded rules, this uses an actual language model to analyze
+    execution context and determine the best course of action.
+    """
+    
+    def __init__(self, agent_session):
+        """
+        Initialize with access to the agent's session/model.
+        
+        Args:
+            agent_session: The Javis agent session with model calling capability
+        """
+        self.agent = agent_session
+        self.analysis_count = 0
+    
+    def analyze(self, state: ExecutionState, 
+                plan: Any,
+                last_action: str,
+                last_result: Any) -> Optional[str]:
+        """
+        Use LLM to analyze execution context and determine if replanning is needed.
+        
+        Args:
+            state: Current execution state
+            plan: Current plan
+            last_action: Last action taken
+            last_result: Result of last action
+        
+        Returns:
+            ReplanReason string if replanning needed, None otherwise
+            Or LLM's custom analysis in natural language
+        """
+        self.analysis_count += 1
+        
+        # Build context for the LLM
+        context = self._build_analysis_context(state, plan, last_action, last_result)
+        
+        # Create prompt for metacognitive reasoning
+        prompt = self._create_metacognition_prompt(context)
+        
+        try:
+            # Call the agent's model to analyze the situation
+            analysis_response = self.agent.call_model(
+                system_message=self._get_system_prompt(),
+                user_message=prompt,
+                temperature=0.3  # Low temp for consistent reasoning
+            )
+            
+            # Parse LLM response to extract decision and reasoning
+            return self._parse_llm_analysis(analysis_response, state)
+            
+        except Exception as e:
+            # Fallback to rule-based if LLM fails
+            print(f"LLM metacognition failed: {e}, falling back to rules")
+            return None
+    
+    def _build_analysis_context(self, state: ExecutionState, 
+                                plan: Any,
+                                last_action: str,
+                                last_result: Any) -> Dict[str, Any]:
+        """Build comprehensive context for LLM analysis."""
+        return {
+            "goal": getattr(plan, 'goal', 'Unknown goal'),
+            "step_count": state.step_count,
+            "success_rate": f"{state.success_rate:.1%}",
+            "failed_steps": state.failed_steps,
+            "recent_errors": state.errors[-3:] if state.errors else [],
+            "blockers": state.blockers[-2:] if state.blockers else [],
+            "last_action": last_action[:200],  # Truncate for context window
+            "last_result_summary": str(last_result)[:500] if last_result else "None",
+            "is_struggling": state.is_struggling,
+        }
+    
+    def _create_metacognition_prompt(self, context: Dict[str, Any]) -> str:
+        """Create a prompt for the LLM to analyze execution and decide on replanning."""
+        return f"""You are an intelligent planning assistant analyzing agent execution.
+
+EXECUTION CONTEXT:
+- Goal: {context['goal']}
+- Current Step: {context['step_count']}
+- Success Rate: {context['success_rate']}
+- Failed Steps: {context['failed_steps']}
+- Recent Errors: {context['recent_errors'] or 'None'}
+- Blockers: {context['blockers'] or 'None'}
+
+LAST ACTION & RESULT:
+- Action: {context['last_action']}
+- Result: {context['last_result_summary']}
+
+IS THE AGENT STRUGGLING? {context['is_struggling']}
+
+ANALYSIS TASKS:
+1. Should the agent replan right now? (yes/no)
+2. If yes, what type of problem is this? Choose one:
+   - BLOCKED: Dependencies failed blocking progress
+   - ERROR: Tool execution failed
+   - WRONG_APPROACH: Strategy isn't working
+   - INEFFICIENT: Better path exists
+   - COMPLEX: Problem harder than expected
+   - CONTINUE: Keep going, no replanning needed
+
+3. Provide specific reasoning for your decision (2-4 sentences)
+
+Respond in this EXACT format:
+DECISION: [BLOCKED|ERROR|WRONG_APPROACH|INEFFICIENT|COMPLEX|CONTINUE]
+REASONING: [Your explanation here]"""
+    
+    def _get_system_prompt(self) -> str:
+        """System prompt for the LLM metacognitive analyzer."""
+        return """You are an expert planning and execution analysis AI. Your job is to analyze agent execution context and determine whether replanning is needed, and if so, what type of problem exists.
+
+Be analytical but practical. Consider:
+- Is the agent making progress toward its goal?
+- Are errors recoverable or indicative of fundamental problems?
+- Would a different approach be more efficient?
+- Is the problem complexity being underestimated?
+
+Your analysis should be concise and actionable."""
+    
+    def _parse_llm_analysis(self, response: str, state: ExecutionState) -> Optional[str]:
+        """Parse LLM response to extract decision and reasoning."""
+        try:
+            # Extract DECISION line
+            decision_match = re.search(r'DECISION:\s*(\w+)', response, re.IGNORECASE)
+            if not decision_match:
+                return None
+            
+            decision = decision_match.group(1).upper()
+            
+            # Map to ReplanReason enum or CONTINUE
+            valid_reasons = ['BLOCKED', 'ERROR', 'WRONG_APPROACH', 'INEFFICIENT', 'COMPLEX']
+            if decision in valid_reasons:
+                return decision
+            
+            # If CONTINUE, no replanning needed
+            if decision == 'CONTINUE':
+                return None
+            
+            # Fallback to ERROR for unknown decisions
+            print(f"Unknown LLM decision: {decision}, treating as ERROR")
+            return ReplanReason.ERROR.value
+            
+        except Exception as e:
+            print(f"Failed to parse LLM analysis: {e}")
+            return None
+
+
 class MetacognitiveMonitor:
     """
-    Monitors execution and decides when to replan.
+    Monitors execution and decides when to replan using LLM intelligence.
     
-    Like Cursor's orchestrator, but with intelligence about
-    WHEN planning is needed vs just executing.
+    Combines LLM-powered analysis with rule-based fallback for reliability.
     """
     
-    def __init__(self):
+    def __init__(self, agent_session=None):
         self.history: List[MetaThought] = []
+        self.agent_session = agent_session
+        
+        # Initialize LLM analyzer if we have access to the agent
+        self.llm_analyzer = None
+        if agent_session:
+            try:
+                self.llm_analyzer = LLMMetacognitiveAnalyzer(agent_session)
+            except Exception as e:
+                print(f"Could not initialize LLM metacognition: {e}")
+        
+        # Rule-based fallback (still used for quick checks and when LLM unavailable)
         self.rules: List[Callable] = [
             self._check_for_errors,
             self._check_for_blockers,
@@ -83,7 +244,11 @@ class MetacognitiveMonitor:
                       last_action: str,
                       last_result: Any) -> Optional[ReplanReason]:
         """
-        Autonomously decide if replanning is needed.
+        Decide if replanning is needed using LLM analysis with rule fallback.
+        
+        Priority order:
+        1. Try LLLM-powered analysis (preferred for intelligent decisions)
+        2. Fall back to rule-based checks if LLM unavailable or fails
         
         Args:
             state: Current execution state
@@ -97,14 +262,27 @@ class MetacognitiveMonitor:
         # Update state
         state.last_result = last_result
         
-        # Run all monitoring rules
+        # Try LLM analysis first (if available)
+        if self.llm_analyzer:
+            llm_decision = self.llm_analyzer.analyze(state, plan, last_action, last_result)
+            if llm_decision and llm_decision != 'CONTINUE':
+                reason = ReplanReason(llm_decision.lower())
+                # Log the LLM-powered decision
+                self._record_thought(
+                    observation=state.summary,
+                    reflection=f"LLM analysis detected {reason.value}",
+                    decision=f"Recommend replanning: {reason.value}"
+                )
+                return reason
+        
+        # Fallback to rule-based checks if no LLM or LLM says CONTINUE
         for rule in self.rules:
             reason = rule(state, plan, last_action, last_result)
             if reason:
-                # Log the decision
+                # Log the decision (rule-based fallback)
                 self._record_thought(
                     observation=state.summary,
-                    reflection=f"Detected condition for {reason.value}",
+                    reflection=f"Rule detected condition for {reason.value}",
                     decision=f"Recommend replanning: {reason.value}"
                 )
                 return reason
@@ -115,17 +293,15 @@ class MetacognitiveMonitor:
                           plan: Any, 
                           action: str,
                           result: Any) -> Optional[ReplanReason]:
-        """Check if recent action failed."""
+        """Quick rule-based error detection (fallback)."""
         if result is None:
             state.failed_steps += 1
             return ReplanReason.ERROR
         
-        # Check if result indicates error
         if isinstance(result, str) and any(x in result.lower() for x in ["error", "failed", "exception"]):
             state.failed_steps += 1
             state.errors.append(result[:100])
             
-            # Multiple errors = blocked
             if len(state.errors) > 2:
                 return ReplanReason.BLOCKED
             return ReplanReason.ERROR
@@ -137,18 +313,15 @@ class MetacognitiveMonitor:
                             plan: Any,
                             action: str,
                             result: Any) -> Optional[ReplanReason]:
-        """Check if dependencies blocking progress."""
-        # Check plan health
+        """Quick rule-based blocker detection (fallback)."""
         if hasattr(plan, 'tasks'):
             pending = sum(1 for t in plan.tasks if t.status.name == 'PENDING')
             failed = sum(1 for t in plan.tasks if t.status.name == 'FAILED')
             
             if failed > 0 and pending > 0:
-                # Some tasks failed but others pending - blocked
                 state.blockers.append(f"{failed} failed tasks blocking {pending} pending")
                 return ReplanReason.BLOCKED
             
-            # Stuck on same task for many iterations
             if state.step_count > 10 and pending == 0:
                 return ReplanReason.COMPLEX
         
@@ -158,8 +331,7 @@ class MetacognitiveMonitor:
                                 plan: Any,
                                 action: str,
                                 result: Any) -> Optional[ReplanReason]:
-        """Check if there's a better approach."""
-        # Too many retries on same type of action
+        """Quick rule-based efficiency check (fallback)."""
         if state.failed_steps > 3:
             return ReplanReason.INEFFICIENT
         
@@ -169,8 +341,7 @@ class MetacognitiveMonitor:
                               plan: Any,
                               action: str,
                               result: Any) -> Optional[ReplanReason]:
-        """Check if problem is more complex than initial plan."""
-        # Many steps taken but low success rate
+        """Quick rule-based complexity check (fallback)."""
         if state.step_count > 5 and state.success_rate < 0.4:
             return ReplanReason.COMPLEX
         
@@ -197,6 +368,7 @@ class MetacognitiveMonitor:
         # Analyze patterns
         error_count = sum(1 for t in self.history if "error" in t.decision.lower())
         blocker_count = sum(1 for t in self.history if "block" in t.reflection.lower())
+        llm_usage = sum(1 for t in self.history if "llm" in t.reflection.lower())
         
         if error_count > 3:
             insights.append(f"{error_count} replans due to errors - execution prone to failures")
@@ -205,6 +377,7 @@ class MetacognitiveMonitor:
             insights.append(f"{blocker_count} replans due to blockers - plan had dependency issues")
         
         insights.append(f"Total metacognitive checks: {len(self.history)}")
+        insights.append(f"LLM-powered decisions: {llm_usage}")
         
         return insights
 
@@ -236,8 +409,6 @@ class PlanValidator:
         current_state = context.get('current_state', '')
         
         if initial_assumptions and current_state:
-            # Simple check: did key assumptions change?
-            # (In real implementation, this would be more sophisticated)
             pass
         
         # Check task dependencies
@@ -254,9 +425,9 @@ class PlanValidator:
 
 class AdaptivePlanner:
     """
-    Planner that adapts based on execution feedback.
+    Planner that adapts based on LLM-powered metacognitive feedback.
     
-    Extends SimplePlanner with learning from execution.
+    Extends SimplePlanner with intelligent learning from execution.
     """
     
     def __init__(self, base_planner):
@@ -271,48 +442,42 @@ class AdaptivePlanner:
         
         Args:
             session: Current agent session
-            reason: Why we're replanning
+            reason: Why we're replanning (from LLM analysis or rules)
             state: Current execution state
         
         Returns:
-            New plan
+            New plan adapted to the situation
         """
         # Learn from pattern
         pattern_key = f"{session.goal[:50]}-{reason.value}"
         self.execution_patterns[pattern_key] = self.execution_patterns.get(pattern_key, 0) + 1
         
-        # Adjust strategy based on reason
+        # Adjust strategy based on reason (now informed by LLM analysis)
         if reason == ReplanReason.ERROR:
-            # Be more careful: add verification steps
             new_plan = self._create_safer_plan(session)
         elif reason == ReplanReason.BLOCKED:
-            # Remove failed dependencies
             new_plan = self._create_alternative_plan(session)
         elif reason == ReplanReason.INEFFICIENT:
-            # Simplify approach
             new_plan = self._create_simplified_plan(session)
         elif reason == ReplanReason.COMPLEX:
-            # Break into sub-agents
             new_plan = self._create_subagent_plan(session)
+        elif reason == ReplanReason.WRONG_APPROACH:
+            # LLM detected wrong approach - try completely different strategy
+            new_plan = self._create_alternative_strategy(session)
         else:
-            # Standard replan
             new_plan = self.base_planner.replan(session.plan, reason.value)
         
-        # Record that we adapted
         session.replan_count = getattr(session, 'replan_count', 0) + 1
         
         return new_plan
     
     def _create_safer_plan(self, session: Any) -> Any:
         """Create a plan with more verification steps."""
-        # Add intermediate checkpoints
         base_plan = self.base_planner.create_plan(session.goal)
-        # (In real implementation, would add verify steps)
         return base_plan
     
     def _create_alternative_plan(self, session: Any) -> Any:
         """Create plan avoiding current blockers."""
-        # Remove or work around failed tasks
         return self.base_planner.create_plan(session.goal + " (alternative approach)")
     
     def _create_simplified_plan(self, session: Any) -> Any:
@@ -320,9 +485,12 @@ class AdaptivePlanner:
         return self.base_planner.create_plan(session.goal + " (simplified)")
     
     def _create_subagent_plan(self, session: Any) -> Any:
-        """Break into sub-agent tasks."""
-        # Would spawn specialized sub-agents
+        """Break into sub-agent tasks for complex problems."""
         return self.base_planner.create_plan(session.goal + " (with sub-agents)")
+    
+    def _create_alternative_strategy(self, session: Any) -> Any:
+        """Create plan with completely different approach (LLM detected wrong strategy)."""
+        return self.base_planner.create_plan(session.goal + " (different strategy)")
 
 
 class ContextAwareRetriever:
@@ -352,7 +520,6 @@ class ContextAwareRetriever:
         context = {}
         
         # 1. Relevant memories
-        # Search for similar past experiences
         recall_results = self.javis.recall(current_thought[:50])
         context["memories"] = recall_results[:500]
         
@@ -361,8 +528,5 @@ class ContextAwareRetriever:
             active_tasks = [t for t in plan.tasks 
                           if t.status.name in ['IN_PROGRESS', 'PENDING']]
             context["active_tasks"] = active_tasks[:max_items]
-        
-        # 3. Current execution state
-        # (Would include recent tool outputs, errors, etc.)
         
         return context
